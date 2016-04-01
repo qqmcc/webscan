@@ -23,32 +23,6 @@ size_t curl_writer(void *ptr, size_t size, size_t nmemb, void * stream)
 	return count;
 };
 
-int curl_post_form(const char *url,\
-	                 const char *postdata,\
-	                 const char *proxy,\
-	                 const char *cookie,\
-	                 void *stream)
-
-{
-   CURL *curl = curl_easy_init();
-   curl_easy_setopt(curl,CURLOPT_URL,url); //url地址  
-   curl_easy_setopt(curl,CURLOPT_POSTFIELDS,postdata); //post参数  
-   curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,curl_writer); //对返回的数据进行操作的函数地址  
-   curl_easy_setopt(curl,CURLOPT_WRITEDATA,stream); //这是write_data的第四个参数值  
-   curl_easy_setopt(curl,CURLOPT_POST,1); //设置问非0表示本次操作为post   
-   curl_easy_setopt(curl,CURLOPT_HEADER,1); //将响应头信息和相应体一起传给write_data  
-   curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION,1); //设置为非0,响应头信息location  
-   curl_easy_setopt(curl,CURLOPT_COOKIE,cookie);
-   CURLcode res = curl_easy_perform(curl); 
-   if (res != CURLE_OK)
-   {
-   curl_easy_cleanup(curl);
-    return 0;
-   }
-   curl_easy_cleanup(curl);
-   return 1;
-  
-}
 
 
 size_t curl_head(void *ptr, size_t size, size_t nmemb, void *stream)
@@ -210,7 +184,78 @@ size_t curl_read(void *ptr, size_t size, size_t nmemb, void *stream)
 	return count;
 }
 
-char* curl_http_content(const char *uri)
+char* curl_post_form(const char *url,\
+	                 const char *postdata,\
+	                 const char *proxy,\
+	                 const char *cookie,\
+	                 int flag_cookie)
+
+
+{
+   long timeout = 10800;
+	long connect_timeout = 15;
+	long low_speed_limit = 1024;
+	long low_speed_time = 60;
+
+	struct mem_node *mem_head = NULL;
+	long response_code;
+   CURL *curl = curl_easy_init();
+   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1); // for thread safe
+   curl_easy_setopt(curl,CURLOPT_URL,url); //url地址  
+   curl_easy_setopt(curl,CURLOPT_POSTFIELDS,postdata); //post参数  
+   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connect_timeout);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+	curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, low_speed_limit);
+	curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, low_speed_time);
+   curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,&curl_read); //对返回的数据进行操作的函数地址  
+   curl_easy_setopt(curl,CURLOPT_WRITEDATA,&mem_head); //这是write_data的第四个参数值  
+   curl_easy_setopt(curl,CURLOPT_POST,1); //设置非0表示本次操作为post   
+   curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION,1); //设置为非0,响应头信息location  
+   if(flag_cookie)
+   {
+    curl_easy_setopt(curl,CURLOPT_COOKIEFILE,"./cookie.txt");
+     curl_easy_setopt(curl,CURLOPT_COOKIEJAR,"./cookie.txt");
+ }
+  // curl_easy_setopt(easy_handle, CURLOPT_PROXY,proxy);
+   CURLcode rc = curl_easy_perform(curl); 
+  	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+	curl_easy_cleanup(curl);
+	if (rc!=CURLE_OK) {
+		return NULL;
+	}else if (response_code!=200 && response_code!=206){
+		struct mem_node *p = mem_head;
+		while(p){
+			struct mem_node *q = p;
+			p = p->next;
+			free(q->buffer);
+			free(q);
+		}
+		return NULL;
+	}else{
+		struct mem_node *p = mem_head;
+		size_t size = 0;
+		while(p){
+			size += p->size;
+			p = p->next;
+		}
+		char *content = (char*)malloc(size+1);
+		p = mem_head;
+		size = 0;
+		while(p){
+			memcpy(content+size, p->buffer, p->size);
+			size += p->size;
+			struct mem_node *q = p;
+			p = p->next;
+			free(q->buffer);
+			free(q);
+		}
+		content[size] = 0;
+		return content;
+	}
+  
+}
+
+char* curl_http_content(const char *uri ,int flag_cookie)
 {
 	long timeout = 10800;
 	long connect_timeout = 15;
@@ -230,6 +275,11 @@ char* curl_http_content(const char *uri)
 	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &curl_read);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &mem_head);
+	if(flag_cookie)
+	{
+	 curl_easy_setopt(curl,CURLOPT_COOKIEFILE,"./cookie.txt");
+    curl_easy_setopt(curl,CURLOPT_COOKIEJAR,"./cookie.txt");
+    }
 	CURLcode rc = curl_easy_perform(curl);
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
 	curl_easy_cleanup(curl);
@@ -290,11 +340,27 @@ int get_http_file(const char * localpath, const char * remotepath, const char * 
 	}
 }
 
-char* get_http_content(const char *uri)
+char * get_http_form(const char *url,\
+	                 const char *postdata,\
+	                 const char *proxy,\
+	                 const char *cookie,
+	                 int flag_cookie)
+{
+		struct response_head test;
+	while(1){
+		char *content = curl_post_form(url,postdata,proxy,cookie,flag_cookie);
+		if (content) return content;
+		else if (curl_http_head(&test, "http://www.baidu.com/img/bdlogo.gif", "",NULL)) return NULL;
+		else sleep(60);
+	}
+	
+}
+
+char * get_http_content(const char *uri,int flag_cookie)
 {
 	struct response_head test;
 	while(1){
-		char *content = curl_http_content(uri);
+		char *content = curl_http_content(uri,flag_cookie);
 		if (content) return content;
 		else if (curl_http_head(&test, "http://www.baidu.com/img/bdlogo.gif", "",NULL)) return NULL;
 		else sleep(60);

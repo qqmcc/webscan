@@ -511,6 +511,8 @@ void process_parseurl(void *arg)
 	 	 printf("get http error:%s\n",urlinfo->url);
 		 return;
 	 	}
+	 char *html=char*malloc(strlen(htmlinfo)+1);
+	 strcpy(html,htmlinfo);
 	 xmlDocPtr doc = gumbo_libxml_parse(htmlinfo);
 	 free(htmlinfo);
 	 if(doc==NULL)
@@ -589,6 +591,7 @@ if(doc==NULL)
              md5(node->md5,uri,strlen(uri));          
            update_complete_node(node->md5);
   process_parseurl(node);
+  
   while(1)
   	{
   	sleep(3600);
